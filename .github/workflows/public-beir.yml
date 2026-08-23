@@ -1,0 +1,54 @@
+name: Public BEIR Benchmark
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beir:
+    name: BEIR ${{ matrix.dataset }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset: [scifact, nfcorpus, arguana]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download canonical BEIR dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-data benchmark-results
+          url="https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/${{ matrix.dataset }}.zip"
+          curl --fail --location --retry 3 --retry-delay 2 "$url" -o "/tmp/${{ matrix.dataset }}.zip"
+          unzip -q "/tmp/${{ matrix.dataset }}.zip" -d benchmark-data
+          test -f "benchmark-data/${{ matrix.dataset }}/corpus.jsonl"
+          test -f "benchmark-data/${{ matrix.dataset }}/queries.jsonl"
+          test -f "benchmark-data/${{ matrix.dataset }}/qrels/test.tsv"
+
+      - name: Run frozen deterministic retriever
+        env:
+          BENCH_DATASET: ${{ matrix.dataset }}
+          BEIR_DATASET_DIR: ${{ github.workspace }}/benchmark-data/${{ matrix.dataset }}
+          BENCH_OUTPUT: ${{ github.workspace }}/benchmark-results/${{ matrix.dataset }}.json
+        run: node --experimental-strip-types benchmarks/public-beir.ts
+
+      - name: Show report
+        run: cat "benchmark-results/${{ matrix.dataset }}.md"
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: initial-public-benchmark-${{ matrix.dataset }}
+          path: benchmark-results/${{ matrix.dataset }}.*
+          retention-days: 90
